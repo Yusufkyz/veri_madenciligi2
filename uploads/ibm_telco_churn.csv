@@ -1,0 +1,6 @@
+customerID,gender,SeniorCitizen,Partner,Dependents,tenure,PhoneService,MonthlyCharges,Contract,Churn
+7590-VHVEG,Female,0,Yes,No,1,No,29.85,Month-to-month,No
+5575-GNVDE,Male,0,No,No,34,Yes,56.95,One year,Yes
+3668-QPYBK,Male,0,No,No,2,Yes,53.85,Month-to-month,No
+7795-CFOCW,Male,0,No,No,45,No,42.3,One year,No
+9237-HQITU,Female,0,No,No,2,Yes,70.7,Month-to-month,Yes

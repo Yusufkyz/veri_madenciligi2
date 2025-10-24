@@ -1,0 +1,6 @@
+CustomerId,CreditScore,Geography,Gender,Age,Balance,IsActiveMember,EstimatedSalary,Exited
+15634602,619,France,Female,42,0.0,1,101348.88,1
+15647311,608,Spain,Female,41,83807.86,1,112542.58,0
+15619304,502,France,Female,42,159660.8,0,113931.57,1
+15701354,699,France,Female,39,0.0,0,93826.63,0
+15737888,850,Spain,Male,43,125510.82,1,79084.1,0
