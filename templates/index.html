@@ -21,7 +21,6 @@
       {% endif %}
     {% endwith %}
 
-    <!-- Veri Yukleme -->
     <div class="card bg-secondary mb-4">
         <div class="card-header">CSV Dosyasi Yukleyin</div>
         <div class="card-body">
@@ -36,7 +35,6 @@
     </div>
 
     {% if filename %}
-        <!-- Hedef Degisken Secimi -->
         <div class="card bg-secondary mb-4">
             <div class="card-header">Hedef Degiskeni Secin</div>
             <div class="card-body">
@@ -57,7 +55,6 @@
             </div>
         </div>
 
-        <!-- EDA -->
         <div class="card bg-secondary mb-4">
             <div class="card-header">Kesifsel Veri Analizi (EDA)</div>
             <div class="card-body">
@@ -65,7 +62,6 @@
             </div>
         </div>
 
-        <!-- Model Egit -->
         <div class="card bg-secondary mb-4">
             <div class="card-header">Modeli Egit ve Tahmin Yap</div>
             <div class="card-body">
@@ -74,9 +70,18 @@
                 </form>
             </div>
         </div>
-    {% endif %}
+        
+        {% if model_trained %}
+        <div class="card bg-secondary mb-4">
+            <div class="card-header">Musteri Terk Riskini Yorumla (SHAP)</div>
+            <div class="card-body">
+                <p>Eğitilen modelin tek bir müşterinin risk kararını nasıl verdiğini görün.</p>
+                <a href="/interpret" class="btn btn-danger">Rastgele Müşteriyi Yorumla</a>
+            </div>
+        </div>
+        {% endif %}
+        {% endif %}
 
-    <!-- Model Sonuclari -->
     {% if result %}
     <div class="card bg-secondary mb-4">
         <div class="card-header">Model Egitim Sonuclari</div>
