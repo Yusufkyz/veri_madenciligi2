@@ -1,178 +1,247 @@
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_score, recall_score, f1_score
-# YENİ İTHALATLAR
-from sklearn.preprocessing import StandardScaler
-from sklearn.impute import SimpleImputer
-import xgboost as xgb
-# --------------------
-from sklearn.svm import SVC
-import seaborn as sns
-import matplotlib.pyplot as plt
+from typing import Dict, Any
 from io import BytesIO
 import base64
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 from markupsafe import Markup
-from typing import Tuple, Any, Dict # Tip ipuçları için kritik import
+
+from sklearn.model_selection import (
+    train_test_split,
+    StratifiedKFold,
+    cross_val_score,
+    GridSearchCV
+)
+from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
+
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    classification_report,
+    confusion_matrix
+)
+
+
+# --------------------------------------------------
+# YARDIMCI FONKSİYONLAR
+# --------------------------------------------------
 
 def clean_text(text):
-    """Bozuk Unicode karakterleri temizle"""
     if isinstance(text, str):
-        return text.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+        return text.encode("utf-8", errors="ignore").decode("utf-8", errors="ignore")
     return text
 
+
 def fig_to_base64(fig):
-    """Matplotlib figürünü Base64 stringe dönüştür"""
     buf = BytesIO()
-    plt.tight_layout()
-    fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+    fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
     plt.close(fig)
     buf.seek(0)
-    return base64.b64encode(buf.read()).decode('ascii')
+    return base64.b64encode(buf.read()).decode("ascii")
 
-# FONKSİYON İMZASI: (HTML, En İyi Model, X_test) döndürülüyor
-def train_model(df: pd.DataFrame, target_column: str) -> Tuple[Any, Any, pd.DataFrame]:
-    
-    best_model = None
-    X_test_result = pd.DataFrame() 
-    
+
+# --------------------------------------------------
+# ANA MODEL EĞİTİM FONKSİYONU
+# --------------------------------------------------
+
+def train_model(df: pd.DataFrame, target_column: str) -> Markup:
+
+    # ---------- KONTROLLER ----------
     if target_column not in df.columns:
-        return Markup("<p style='color:red;'>Seçilen hedef sütun veride bulunamadı.</p>"), None, X_test_result
+        return Markup("<p style='color:red;'>Hedef sütun veride bulunamadı.</p>")
 
     if df[target_column].nunique() < 2:
-        return Markup("<p style='color:red;'>Hedef değişkende yalnızca tek bir sınıf var! Eğitim yapılamaz.</p>"), None, X_test_result
+        return Markup("<p style='color:red;'>Hedef değişkende yalnızca tek sınıf var.</p>")
 
     try:
         df = df.copy()
+
         for col in df.columns:
-            if df[col].dtype == 'object':
+            if df[col].dtype == "object":
                 df[col] = df[col].apply(clean_text)
 
-        y = df[target_column].copy()
+        # ---------- HEDEF ----------
+        y = df[target_column].astype(str).str.strip().str.lower()
+        mapping = {
+            "yes": 1, "no": 0,
+            "true": 1, "false": 0,
+            "1": 1, "0": 0,
+            "churn": 1, "no churn": 0
+        }
+        y = y.map(mapping)
 
-        if y.dtype == 'O':
-            y = y.astype(str).str.strip().str.lower()
-            mapping = {'yes': 1, 'no': 0, 'true': 1, 'false': 0, '1': 1, '0': 0, 'churn': 1, 'no churn': 0}
-            y = y.map(mapping)
-        
-        if y.isnull().any() or y.nunique() < 2 or any(y.value_counts() < 2):
-             return Markup("<p style='color:red;'>Hedef sütun dönüştürülemedi, eksik değer içeriyor veya yeterli sınıf örneği yok.</p>"), None, X_test_result
+        if y.isnull().any() or y.nunique() < 2:
+            return Markup("<p style='color:red;'>Hedef değişken dönüştürülemedi.</p>")
 
-
+        # ---------- ÖZELLİKLER ----------
         X = df.drop(columns=[target_column])
-        X = X.select_dtypes(include=['number', 'object'])
-        
-        numerical_cols = X.select_dtypes(include=['number']).columns
-        categorical_cols = X.select_dtypes(include=['object']).columns
+        X = X.select_dtypes(include=["number", "object"])
 
-        if not numerical_cols.empty:
-            imputer = SimpleImputer(strategy='mean')
-            X[numerical_cols] = imputer.fit_transform(X[numerical_cols])
-            scaler = StandardScaler()
-            X[numerical_cols] = scaler.fit_transform(X[numerical_cols])
+        num_cols = X.select_dtypes(include="number").columns
+        cat_cols = X.select_dtypes(include="object").columns
 
-        if not categorical_cols.empty:
-            X = pd.get_dummies(X, columns=categorical_cols, drop_first=True)
-            
-        X = X.fillna(0)
-        
-        # XGBoost uyumluluğu için sütun başlıklarını temizleme
-        X.columns = ["".join(c if c.isalnum() else "_" for c in str(x)) for x in X.columns]
-        
-        X_train, X_test_result, y_train, y_test = train_test_split(
-            X, y, test_size=0.3, random_state=42, stratify=y
+        if len(num_cols) > 0:
+            X[num_cols] = SimpleImputer(strategy="mean").fit_transform(X[num_cols])
+            X[num_cols] = StandardScaler().fit_transform(X[num_cols])
+
+        if len(cat_cols) > 0:
+            X = pd.get_dummies(X, columns=cat_cols, drop_first=True)
+
+        X.columns = ["".join(c if c.isalnum() else "_" for c in col) for col in X.columns]
+
+        # ---------- TRAIN / TEST ----------
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y,
+            test_size=0.3,
+            stratify=y,
+            random_state=42
         )
 
+        # ---------- MODELLER ----------
         models: Dict[str, Any] = {
-            # max_iter 2000'e çıkarıldı
-            "Logistic Regression": LogisticRegression(max_iter=2000, random_state=42), 
-            "Random Forest (Dengeli)": RandomForestClassifier(
-                random_state=42, 
-                n_estimators=150, 
-                class_weight='balanced'
+            "Logistic Regression": LogisticRegression(max_iter=2000, random_state=42),
+            "Random Forest": RandomForestClassifier(
+                n_estimators=150,
+                class_weight="balanced",
+                random_state=42
             ),
-            "XGBoost Classifier": xgb.XGBClassifier(
-                use_label_encoder=False, 
-                eval_metric='logloss', 
-                random_state=42, 
-                n_estimators=100,
-                scale_pos_weight=(y_train.value_counts()[0] / y_train.value_counts()[1])
-            )
+            "SVM": SVC(kernel="rbf", probability=True, random_state=42)
         }
 
-        results: Dict[str, Dict[str, Any]] = {}
+        results = {}
         model_details = []
-        best_f1 = -1 
 
+        best_model = None
+        best_model_name = ""
+        best_f1 = -1
+
+        # ---------- MODEL EĞİTİM + CV ----------
         for name, model in models.items():
             model.fit(X_train, y_train)
-            y_pred = model.predict(X_test_result)
+            y_pred = model.predict(X_test)
 
             acc = accuracy_score(y_test, y_pred)
             prec = precision_score(y_test, y_pred, zero_division=0)
             rec = recall_score(y_test, y_pred, zero_division=0)
             f1 = f1_score(y_test, y_pred, zero_division=0)
-            
-            if f1 > best_f1:
-                best_f1 = f1
-                best_model = model
+
+            cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+            cv_scores = cross_val_score(model, X_train, y_train, cv=cv, scoring="f1")
 
             results[name] = {
                 "Model": name,
                 "Accuracy": round(acc, 3),
                 "Precision": round(prec, 3),
                 "Recall": round(rec, 3),
-                "F1-Score": round(f1, 3)
+                "F1-Score": round(f1, 3),
+                "CV F1 Mean": round(cv_scores.mean(), 3),
+                "CV F1 Std": round(cv_scores.std(), 3)
             }
 
-            report = classification_report(y_test, y_pred, digits=3)
-            report = clean_text(report)
+            if f1 > best_f1:
+                best_f1 = f1
+                best_model = model
+                best_model_name = name
 
+            report = classification_report(y_test, y_pred, digits=3)
             cm = confusion_matrix(y_test, y_pred)
+
             fig, ax = plt.subplots(figsize=(5, 4))
-            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=False, ax=ax)
+            sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False, ax=ax)
             ax.set_title(f"{name} - Confusion Matrix")
-            ax.set_xlabel("Tahmin Edilen")
-            ax.set_ylabel("Gerçek Değer")
-            img_base64 = fig_to_base64(fig)
 
             model_details.append({
                 "name": name,
                 "report": report,
-                "img": img_base64
+                "img": fig_to_base64(fig)
             })
 
-        # --- HTML OLUŞTUR ---
+        # ---------- GRIDSEARCH (SADECE RF) ----------
+        if best_model_name == "Random Forest":
+            rf_param_grid = {
+                "n_estimators": [100, 200],
+                "max_depth": [None, 10, 20],
+                "min_samples_split": [2, 5],
+                "min_samples_leaf": [1, 2]
+            }
+
+            grid = GridSearchCV(
+                RandomForestClassifier(
+                    class_weight="balanced",
+                    random_state=42
+                ),
+                rf_param_grid,
+                scoring="f1",
+                cv=5,
+                n_jobs=-1
+            )
+
+            grid.fit(X_train, y_train)
+            tuned_model = grid.best_estimator_
+
+            y_pred = tuned_model.predict(X_test)
+
+            acc = accuracy_score(y_test, y_pred)
+            prec = precision_score(y_test, y_pred, zero_division=0)
+            rec = recall_score(y_test, y_pred, zero_division=0)
+            f1 = f1_score(y_test, y_pred, zero_division=0)
+
+            cv_scores = cross_val_score(
+                tuned_model, X_train, y_train, cv=5, scoring="f1"
+            )
+
+            results["Random Forest (Tuned)"] = {
+                "Model": "Random Forest (Tuned)",
+                "Accuracy": round(acc, 3),
+                "Precision": round(prec, 3),
+                "Recall": round(rec, 3),
+                "F1-Score": round(f1, 3),
+                "CV F1 Mean": round(cv_scores.mean(), 3),
+                "CV F1 Std": round(cv_scores.std(), 3)
+            }
+
+        # ---------- HTML ----------
         html = "<div style='padding:20px;'>"
-        html += "<h3 style='color:#ffc107;'>Model Performans Karşılaştırması (Geliştirilmiş)</h3>"
-        
-        best_model_name = "Bilinmiyor"
-        if best_model and best_f1 > -1:
-            # En iyi model adını bul
-            for name, res in results.items():
-                if res['F1-Score'] == best_f1:
-                    best_model_name = name
-                    break
-            html += f"<p class='text-success'>**💡 En Yüksek F1-Skoru ({best_f1:.3f}) ile En İyi Model: {best_model_name}**</p>"
-        
-        html += "<table class='table table-dark table-striped table-bordered mt-3'>"
-        html += "<thead><tr><th>Model</th><th>Accuracy</th><th>Precision</th><th>Recall</th><th>F1-Score</th></tr></thead><tbody>"
+        html += "<h3 style='color:#ffc107;'>Model Performans Karşılaştırması</h3>"
+        html += "<table class='table table-dark table-striped table-bordered'>"
+        html += (
+            "<thead><tr>"
+            "<th>Model</th><th>Accuracy</th><th>Precision</th>"
+            "<th>Recall</th><th>F1</th><th>CV F1 Mean</th><th>CV Std</th>"
+            "</tr></thead><tbody>"
+        )
+
         for r in results.values():
-            html += f"<tr><td>{r['Model']}</td><td>{r['Accuracy']}</td><td>{r['Precision']}</td><td>{r['Recall']}</td><td>{r['F1-Score']}</td></tr>"
+            html += (
+                f"<tr><td>{r['Model']}</td>"
+                f"<td>{r['Accuracy']}</td>"
+                f"<td>{r['Precision']}</td>"
+                f"<td>{r['Recall']}</td>"
+                f"<td>{r['F1-Score']}</td>"
+                f"<td>{r['CV F1 Mean']}</td>"
+                f"<td>{r['CV F1 Std']}</td></tr>"
+            )
+
         html += "</tbody></table>"
 
         for det in model_details:
-            html += f"<hr><h4 style='color:#0dcaf0;'>{det['name']} Detaylı Rapor</h4>"
-            html += f"<pre style='background:#1e1e1e; color:#d4d4d4; padding:15px; border-radius:5px;'>{det['report']}</pre>"
-            html += f"<img src='data:image/png;base64,{det['img']}' class='img-fluid mt-2 mb-4' style='max-width:100%; border-radius:8px;'/>"
+            html += f"<hr><h4>{det['name']} Detaylı Rapor</h4>"
+            html += f"<pre>{det['report']}</pre>"
+            html += f"<img src='data:image/png;base64,{det['img']}' style='max-width:100%;'/>"
 
         html += "</div>"
-        
-        return Markup(clean_text(html)), best_model, X_test_result
+
+        return Markup(clean_text(html))
 
     except Exception as e:
         import traceback
-        err = clean_text(str(e))
-        tb = clean_text(traceback.format_exc())
-        return Markup(f"<p style='color:red;'>Hata oluştu: {err}</p><pre>{tb}</pre>"), None, X_test_result
+        return Markup(f"<pre>{traceback.format_exc()}</pre>")
